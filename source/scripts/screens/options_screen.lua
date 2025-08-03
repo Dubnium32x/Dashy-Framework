@@ -1,0 +1,206 @@
+import "CoreLibs/graphics"
+import "CoreLibs/object"
+import "CoreLibs/sprites"
+import "CoreLibs/timer"
+import "CoreLibs/ui"
+local Options = import "scripts/world/options"
+
+local pd <const> = playdate
+local gfx <const> = pd.graphics
+
+local OptionsScreen = {}
+OptionsScreen.selectedIndex = 1
+local optionKeys = {
+    "soundEnabled",
+    "musicEnabled",
+    "musicVolume",
+    "startingLives",
+    "peeloutEnabled",
+    "debugMode",
+    "timeoverEnabled",
+    "levelSelectEnabled",
+    "apply",
+    "cancel"
+}
+local optionLabels = {
+    soundEnabled = "Sound",
+    musicEnabled = "Music",
+    musicVolume = "Music Volume",
+    startingLives = "Starting Lives",
+    peeloutEnabled = "Peelout",
+    debugMode = "Debug Mode",
+    timeoverEnabled = "Time Over",
+    levelSelectEnabled = "Level Select",
+    apply = "Apply",
+    cancel = "Cancel"
+}
+
+local cursorSound = pd.sound.sample.new("sounds/Sonic 3K/S3K_5B.wav")
+
+function OptionsScreen:init()
+    self.selectedIndex = 1
+    
+    -- Make sure we have access to the global Options
+    local globalOptions = _G.Options
+    if not globalOptions or not globalOptions.settings then
+        print("[OptionsScreen] Warning: Global Options not found, creating default settings")
+        globalOptions = {
+            settings = {
+                soundEnabled = true,
+                musicEnabled = true,
+                musicVolume = 0.7,
+                startingLives = 3,
+                peeloutEnabled = true,
+                debugMode = true,
+                timeoverEnabled = true,
+                levelSelectEnabled = true
+            }
+        }
+        _G.Options = globalOptions
+    end
+    
+    -- Create a local copy of settings for staging
+    self.stagedSettings = {}
+    for k, v in pairs(globalOptions.settings) do
+        self.stagedSettings[k] = v
+    end
+    
+    -- Initialize default values if not present
+    -- Make sure each option has a default value
+    local defaults = {
+        soundEnabled = true,
+        musicEnabled = true,
+        musicVolume = 0.7,
+        startingLives = 3,
+        peeloutEnabled = true,
+        debugMode = true,
+        timeoverEnabled = true,
+        levelSelectEnabled = false
+    }
+    
+    -- Add any missing default values
+    for k, v in pairs(defaults) do
+        if self.stagedSettings[k] == nil then
+            self.stagedSettings[k] = v
+            print("[OptionsScreen] Adding default value for", k, "=", v)
+        end
+    end
+    
+    -- Print settings to debug console
+    print("[OptionsScreen] Initialized with settings:")
+    for k, v in pairs(self.stagedSettings) do
+        print("  ", k, "=", v)
+    end
+end
+
+function OptionsScreen:update()
+    if pd.buttonJustPressed(pd.kButtonUp) then
+        if cursorSound then cursorSound:play() end
+        self.selectedIndex = self.selectedIndex - 1
+        if self.selectedIndex < 1 then self.selectedIndex = #optionKeys end
+    elseif pd.buttonJustPressed(pd.kButtonDown) then
+        if cursorSound then cursorSound:play() end
+        self.selectedIndex = self.selectedIndex + 1
+        if self.selectedIndex > #optionKeys then self.selectedIndex = 1 end
+    end
+    if pd.buttonJustPressed(pd.kButtonA) then
+        if cursorSound then cursorSound:play() end
+        local key = optionKeys[self.selectedIndex]
+        if key == "apply" then
+            local globalOptions = _G.Options
+            if globalOptions and globalOptions.settings then
+                for k, v in pairs(self.stagedSettings) do
+                    globalOptions.settings[k] = v
+                end
+                if globalOptions.save then
+                    globalOptions:save()
+                end
+                print("[OptionsScreen] Settings applied")
+            else
+                print("[OptionsScreen] Warning: Global Options not found, settings not saved")
+            end
+            
+            -- Apply sound settings immediately
+            if _G.SoundManager then
+                if _G.SoundManager.setMusicVolume and self.stagedSettings.musicVolume then
+                    _G.SoundManager:setMusicVolume(self.stagedSettings.musicVolume)
+                end
+                
+                -- Toggle music if needed
+                if not self.stagedSettings.musicEnabled then
+                    _G.SoundManager:stopMusic()
+                elseif self.stagedSettings.musicEnabled and _G.SoundManager.currentMusic == nil then
+                    _G.SoundManager:playMusic("gameplay")
+                end
+            end
+            
+            local ScreenManager = _G.ScreenManager
+            local TitleScreen = _G.TitleScreen
+            ScreenManager.setScreen(TitleScreen)
+        elseif key == "cancel" then
+            local ScreenManager = _G.ScreenManager
+            local TitleScreen = _G.TitleScreen
+            ScreenManager.setScreen(TitleScreen)
+        elseif key == "startingLives" then
+            self.stagedSettings.startingLives = (self.stagedSettings.startingLives % 5) + 1 -- Cycle through 1 to 5 lives
+        elseif key == "musicVolume" then
+            -- Increment volume by 0.1, loop back to 0.1 after 1.0
+            self.stagedSettings.musicVolume = ((self.stagedSettings.musicVolume * 10) % 10 + 1) / 10
+        elseif self.stagedSettings[key] ~= nil then
+            self.stagedSettings[key] = not self.stagedSettings[key]
+        end
+    end
+    if pd.buttonJustPressed(pd.kButtonB) then
+        local ScreenManager = _G.ScreenManager
+        local TitleScreen = _G.TitleScreen
+        ScreenManager.setScreen(TitleScreen)
+    end
+end
+
+function OptionsScreen:draw()
+    gfx.clear()
+    print("[OptionsScreen] Drawing options screen...")
+    gfx.setFont(gfx.font.new("fonts/monogram-12"))
+    gfx.drawTextAligned("Options", 200, 40, kTextAlignment.center)
+    local menuY = 80
+    for i, key in ipairs(optionKeys) do
+        local label = optionLabels[key]
+        local value = self.stagedSettings[key]
+        local text
+        
+        if key == "apply" or key == "cancel" then
+            text = label
+        elseif key == "musicVolume" then
+            -- Display volume as a percentage
+            local volumePercent = math.floor((value or 0.7) * 100)
+            text = label .. ": " .. volumePercent .. "%"
+        elseif value == nil then
+            -- Handle nil values with a default display
+            if key == "startingLives" then
+                self.stagedSettings[key] = 3
+                text = label .. ": 3"
+            elseif key == "peeloutEnabled" or key == "timeoverEnabled" or key == "levelSelectEnabled" then
+                self.stagedSettings[key] = false
+                text = label .. ": false"
+            else
+                text = label .. ": " .. tostring(value)
+            end
+        else
+            text = label .. ": " .. tostring(value)
+        end
+        local y = menuY + (i-1)*18
+        if i == self.selectedIndex then
+            gfx.setColor(gfx.kColorWhite)
+            gfx.fillRect(80, y-2, 240, 16)
+            gfx.setColor(gfx.kColorBlack)
+            gfx.setImageDrawMode(gfx.kDrawModeFillBlack)
+        else
+            gfx.setImageDrawMode(gfx.kDrawModeFillWhite)
+            gfx.setColor(gfx.kColorWhite)
+        end
+        gfx.drawTextAligned(text, 200, y, kTextAlignment.center)
+    end
+end
+
+_G.OptionsScreen = OptionsScreen
+return OptionsScreen
