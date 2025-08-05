@@ -22,11 +22,11 @@ local function tryLoadImageTable(path)
 end
 
 local paths = {
-    "sprites/tileset/SPGSolidTileHeightCollision_flipped-table-16-16",
-    "source/sprites/tileset/SPGSolidTileHeightCollision_flipped-table-16-16",
-    "/sprites/tileset/SPGSolidTileHeightCollision_flipped-table-16-16",
-    "/source/sprites/tileset/SPGSolidTileHeightCollision_flipped-table-16-16",
-    "SPGSolidTileHeightCollision_flipped-table-16-16"
+    "sprites/tileset/DF-Simple-Collision-table-16-16",
+    "source/sprites/tileset/DF-Simple-Collision-table-16-16",
+    "/sprites/tileset/DF-Simple-Collision-table-16-16",
+    "/source/sprites/tileset/DF-Simple-Collision-table-16-16",
+    "DF-Simple-Collision-table-16-16"
 }
 
 local currentPath = 1

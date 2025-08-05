@@ -14,6 +14,7 @@ local gfx <const> = pd.graphics
 local GamePhysics = import "scripts/player/game_physics"
 local var = import "scripts/player/var"
 local TileCollision = import "scripts/world/tile_collision"
+local TileAngleManager = import "scripts/util/TileAngleManager"
 -- Import PixelCollision at the global level to prevent scope issues
 _G.PixelCollision = import "scripts/world/pixel_collision"
 
@@ -154,12 +155,24 @@ end
 function Player:checkCsvCollisions(level, tileSize)
     -- Pixel-perfect CSV collision logic
     -- Use sensors and tileset image for accurate collision checks
-    local tilesetPath = "source/sprites/tileset/SPGSolidTileHeightCollision_flipped-table-16-16"
+    local tilesetPath = "source/sprites/tileset/DF-Simple-Collision-table-16-16"
     if not self.collisionTileset then
         self.collisionTileset = gfx.imagetable.new(tilesetPath)
         if not self.collisionTileset then
             print("WARNING: Failed to load collision tileset at " .. tilesetPath)
-            return
+            -- Try alternate paths
+            self.collisionTileset = gfx.imagetable.new("sprites/tileset/DF-Simple-Collision-table-16-16")
+            if not self.collisionTileset then
+                self.collisionTileset = gfx.imagetable.new("DF-Simple-Collision-table-16-16")
+            end
+            if not self.collisionTileset then
+                print("ERROR: Could not load tileset from any path!")
+                return
+            else
+                print("SUCCESS: Loaded tileset from alternate path")
+            end
+        else
+            print("SUCCESS: Loaded tileset from primary path")
         end
     end
     local tileset = self.collisionTileset
@@ -178,11 +191,18 @@ function Player:checkCsvCollisions(level, tileSize)
     local wasGrounded = self.grounded
     local groundedThisFrame = false
 
+    -- print("DEBUG: Player position:", px, py, "velocity:", vx, vy, "grounded:", self.grounded)
+
     -- Only check pixel-perfect collision for CSV layers
     for _, layer in ipairs(layersToCheck) do
         local tilemap = layer.data
         local layerName = layer.name
-        if not tilemap then goto continue end
+        if not tilemap then 
+            -- print("DEBUG: Layer", layerName, "has no data")
+            goto continue 
+        end
+        
+        -- print("DEBUG: Checking layer", layerName, "with", #tilemap, "rows")
         local left = math.floor((px - self.widthrad - math.abs(vx)) / tileSize) + 1
         local right = math.floor((px + self.widthrad + math.abs(vx)) / tileSize) + 1
         local top = math.floor((py - self.heightrad - math.abs(vy)) / tileSize) + 1
@@ -204,6 +224,14 @@ function Player:checkCsvCollisions(level, tileSize)
                     local tile = tilemap[ty][tx]
                     if tile and tonumber(tile) > 0 then
                         local tileId = tonumber(tile)
+                        
+                        -- Check if this tile should block horizontal movement
+                        local isBarrier = TileAngleManager.isHorizontalBarrier(tileId)
+                        local wallType = TileAngleManager.getWallType(tileId)
+                        
+                        -- Skip if it's a right-side wall and we're hitting from the left
+                        if wallType == "right" then goto skip_left_wall end
+                        
                         local hasPixelCollision = PixelCollision.checkSensorPixelCollision(
                             tileset,
                             tileId + 1,
@@ -213,16 +241,13 @@ function Player:checkCsvCollisions(level, tileSize)
                             ty - 1,
                             tileSize
                         )
-                        print("Left wall: tileId="..tostring(tileId).." pixelCollision="..tostring(hasPixelCollision))
-                        if hasPixelCollision and self.xspeed <= 0 then
+                        -- print("Left wall: tileId="..tostring(tileId).." barrier="..tostring(isBarrier).." pixelCollision="..tostring(hasPixelCollision))
+                        
+                        if (hasPixelCollision or isBarrier) and self.xspeed <= 0 then
                             self.x = tx * tileSize + self.widthrad + 0.1
                             self.xspeed = 0
-                        elseif not hasPixelCollision then
-                            -- Fallback: tile-based collision
-                            self.x = tx * tileSize + self.widthrad + 0.1
-                            self.xspeed = 0
-                            print("Fallback: tile-based left wall collision")
                         end
+                        ::skip_left_wall::
                     end
                 end
             end
@@ -233,6 +258,14 @@ function Player:checkCsvCollisions(level, tileSize)
                     local tile = tilemap[ty][tx]
                     if tile and tonumber(tile) > 0 then
                         local tileId = tonumber(tile)
+                        
+                        -- Check if this tile should block horizontal movement
+                        local isBarrier = TileAngleManager.isHorizontalBarrier(tileId)
+                        local wallType = TileAngleManager.getWallType(tileId)
+                        
+                        -- Skip if it's a left-side wall and we're hitting from the right
+                        if wallType == "left" then goto skip_right_wall end
+                        
                         local hasPixelCollision = PixelCollision.checkSensorPixelCollision(
                             tileset,
                             tileId + 1,
@@ -242,121 +275,171 @@ function Player:checkCsvCollisions(level, tileSize)
                             ty - 1,
                             tileSize
                         )
-                        print("Right wall: tileId="..tostring(tileId).." pixelCollision="..tostring(hasPixelCollision))
-                        if hasPixelCollision and self.xspeed >= 0 then
+                        -- print("Right wall: tileId="..tostring(tileId).." barrier="..tostring(isBarrier).." pixelCollision="..tostring(hasPixelCollision))
+                        
+                        if (hasPixelCollision or isBarrier) and self.xspeed >= 0 then
                             self.x = (tx - 1) * tileSize - self.widthrad - 0.1
                             self.xspeed = 0
-                        elseif not hasPixelCollision then
-                            -- Fallback: tile-based collision
-                            self.x = (tx - 1) * tileSize - self.widthrad - 0.1
-                            self.xspeed = 0
-                            print("Fallback: tile-based right wall collision")
                         end
+                        ::skip_right_wall::
                     end
                 end
             end
             ::continue_walls::
         end
 
-        -- Ground/celling collisions
-        for tx = left, right do
-            -- Ground
-            if vy >= 0 and self.sensors[1] and self.sensors[2] and tilemap[bottom] then
-                local leftSensorX = math.floor(self.sensors[1].x / tileSize) + 1
-                local rightSensorX = math.floor(self.sensors[2].x / tileSize) + 1
-                local leftSensorTile = tilemap[bottom][leftSensorX]
-                local rightSensorTile = tilemap[bottom][rightSensorX]
-                local leftTileCollision = leftSensorTile and tonumber(leftSensorTile) > 0
-                local rightTileCollision = rightSensorTile and tonumber(rightSensorTile) > 0
-                local hasPixelCollision = false
-                if leftTileCollision then
-                    local leftTileId = tonumber(leftSensorTile)
-                    local leftPixelCollision = PixelCollision.checkSensorPixelCollision(
-                        tileset,
-                        leftTileId + 1,
-                        self.sensors[1].x,
-                        self.sensors[1].y,
-                        leftSensorX - 1,
-                        bottom - 1,
-                        tileSize
-                    )
-                    print("Ground left: tileId="..tostring(leftTileId).." pixelCollision="..tostring(leftPixelCollision))
-                    if leftPixelCollision then hasPixelCollision = true end
+        -- Ground/ceiling collisions with slope support
+        -- Ground collision (falling onto ground or slopes)
+        if vy >= 0 and self.sensors[1] and self.sensors[2] and tilemap[bottom] then
+            local leftSensorX = math.floor(self.sensors[1].x / tileSize) + 1
+            local rightSensorX = math.floor(self.sensors[2].x / tileSize) + 1
+            
+            -- print("DEBUG: Checking ground collision at bottom row", bottom)
+            -- print("DEBUG: Left sensor X:", leftSensorX, "Right sensor X:", rightSensorX)
+            
+            local leftSensorTile = (leftSensorX >= 1 and leftSensorX <= mapWidth) and tilemap[bottom][leftSensorX] or nil
+            local rightSensorTile = (rightSensorX >= 1 and rightSensorX <= mapWidth) and tilemap[bottom][rightSensorX] or nil
+            
+            -- print("DEBUG: Left tile:", leftSensorTile, "Right tile:", rightSensorTile)
+            
+            local leftTileCollision = leftSensorTile and tonumber(leftSensorTile) > 0
+            local rightTileCollision = rightSensorTile and tonumber(rightSensorTile) > 0
+            
+            -- Check for slope collision using heightmaps
+            local groundHeight = nil
+            local groundTileId = nil
+            local groundAngle = 0
+            
+            if leftTileCollision or rightTileCollision then
+                -- Determine which sensor to use (prefer the one that's closer to collision)
+                local primarySensor = nil
+                local primaryTileId = nil
+                local primaryTileX = nil
+                
+                if leftTileCollision and rightTileCollision then
+                    -- Both sensors are on tiles, choose based on Y position or use left sensor
+                    primarySensor = self.sensors[1]
+                    primaryTileId = tonumber(leftSensorTile)
+                    primaryTileX = leftSensorX
+                elseif leftTileCollision then
+                    primarySensor = self.sensors[1]
+                    primaryTileId = tonumber(leftSensorTile)
+                    primaryTileX = leftSensorX
+                elseif rightTileCollision then
+                    primarySensor = self.sensors[2]
+                    primaryTileId = tonumber(rightSensorTile)
+                    primaryTileX = rightSensorX
                 end
-                if rightTileCollision then
-                    local rightTileId = tonumber(rightSensorTile)
-                    local rightPixelCollision = PixelCollision.checkSensorPixelCollision(
-                        tileset,
-                        rightTileId + 1,
-                        self.sensors[2].x,
-                        self.sensors[2].y,
-                        rightSensorX - 1,
-                        bottom - 1,
-                        tileSize
-                    )
-                    print("Ground right: tileId="..tostring(rightTileId).." pixelCollision="..tostring(rightPixelCollision))
-                    if rightPixelCollision then hasPixelCollision = true end
-                end
-                if hasPixelCollision then
-                    self.y = (bottom - 1) * tileSize - self.heightrad - 0.1
-                    self.yspeed = 0
-                    self.grounded = true
-                    groundedThisFrame = true
-                elseif leftTileCollision or rightTileCollision then
-                    -- Fallback: tile-based collision
-                    self.y = (bottom - 1) * tileSize - self.heightrad - 0.1
-                    self.yspeed = 0
-                    self.grounded = true
-                    groundedThisFrame = true
-                    print("Fallback: tile-based ground collision")
+                
+                if primarySensor and primaryTileId then
+                    -- Calculate local X position within the tile
+                    local localX = primarySensor.x - ((primaryTileX - 1) * tileSize)
+                    
+                    -- Get height from heightmap if available, otherwise use tile-based collision
+                    if TileAngleManager.hasHeightMap(primaryTileId) then
+                        local isSlope = TileAngleManager.isSlope(primaryTileId)
+                        
+                        -- Debug output for 1x2 slopes specifically
+                        if primaryTileId == 9 or primaryTileId == 10 then
+                            print("DEBUG 1x2: Tile ID:", primaryTileId, "localX:", localX, "playerY:", self.y, "sensorY:", primarySensor.y)
+                        end
+                        
+                        -- Store current tile for debug display
+                        _G.debugTileId = primaryTileId
+                        
+                        groundHeight = TileAngleManager.getHeightAt(primaryTileId, localX, tileSize)
+                        groundAngle = TileAngleManager.getTileAngle(primaryTileId)
+                        
+                        if groundHeight >= 0 then
+                            -- Calculate precise Y position based on heightmap
+                            local tileTopY = (bottom - 1) * tileSize
+                            local preciseGroundY = tileTopY + (tileSize - 1 - groundHeight)
+                            
+                            -- More robust collision check - allow a larger tolerance for steep slopes
+                            local tolerance = 8 -- pixels (increased further for 1x2 slope debugging)
+                            
+                            -- Debug output for 1x2 slopes specifically
+                            if primaryTileId == 9 or primaryTileId == 10 then
+                                print("DEBUG 1x2: groundHeight:", groundHeight, "tileTopY:", tileTopY, "preciseGroundY:", preciseGroundY, "tolerance:", tolerance)
+                            end
+                            
+                            if primarySensor.y >= (preciseGroundY - tolerance) then
+                                self.y = preciseGroundY - self.heightrad
+                                self.yspeed = 0
+                                self.grounded = true
+                                groundedThisFrame = true
+                                groundTileId = primaryTileId
+                                
+                                if primaryTileId == 9 or primaryTileId == 10 then
+                                    print("DEBUG 1x2: COLLISION! New player Y:", self.y, "angle:", groundAngle)
+                                end
+                            else
+                                if primaryTileId == 9 or primaryTileId == 10 then
+                                    print("DEBUG 1x2: NO COLLISION - sensor too high. Sensor Y:", primarySensor.y, "needed:", (preciseGroundY - tolerance))
+                                end
+                            end
+                        end
+                    else
+                        -- Regular flat tile collision
+                        -- print("DEBUG: Flat tile collision")
+                        self.y = (bottom - 1) * tileSize - self.heightrad - 0.1
+                        self.yspeed = 0
+                        self.grounded = true
+                        groundedThisFrame = true
+                        groundTileId = primaryTileId
+                    end
                 end
             end
-            -- Ceiling
-            if vy < 0 and self.sensors[5] and self.sensors[6] and tilemap[top] then
-                local leftSensorX = math.floor(self.sensors[5].x / tileSize) + 1
-                local rightSensorX = math.floor(self.sensors[6].x / tileSize) + 1
-                local leftSensorTile = tilemap[top][leftSensorX]
-                local rightSensorTile = tilemap[top][rightSensorX]
-                local leftTileCollision = leftSensorTile and tonumber(leftSensorTile) > 0
-                local rightTileCollision = rightSensorTile and tonumber(rightSensorTile) > 0
-                local hasPixelCollision = false
-                if leftTileCollision then
-                    local leftTileId = tonumber(leftSensorTile)
-                    local leftPixelCollision = PixelCollision.checkSensorPixelCollision(
-                        tileset,
-                        leftTileId + 1,
-                        self.sensors[5].x,
-                        self.sensors[5].y,
-                        leftSensorX - 1,
-                        top - 1,
-                        tileSize
-                    )
-                    print("Ceiling left: tileId="..tostring(leftTileId).." pixelCollision="..tostring(leftPixelCollision))
-                    if leftPixelCollision then hasPixelCollision = true end
-                end
-                if rightTileCollision then
-                    local rightTileId = tonumber(rightSensorTile)
-                    local rightPixelCollision = PixelCollision.checkSensorPixelCollision(
-                        tileset,
-                        rightTileId + 1,
-                        self.sensors[6].x,
-                        self.sensors[6].y,
-                        rightSensorX - 1,
-                        top - 1,
-                        tileSize
-                    )
-                    print("Ceiling right: tileId="..tostring(rightTileId).." pixelCollision="..tostring(rightPixelCollision))
-                    if rightPixelCollision then hasPixelCollision = true end
-                end
-                if hasPixelCollision then
-                    self.y = top * tileSize + self.heightrad + 0.1
-                    self.yspeed = 0
-                elseif leftTileCollision or rightTileCollision then
-                    -- Fallback: tile-based collision
-                    self.y = top * tileSize + self.heightrad + 0.1
-                    self.yspeed = 0
-                    print("Fallback: tile-based ceiling collision")
-                end
+            
+            -- Store ground properties for physics
+            self.groundAngle = groundAngle
+            self.groundTileId = groundTileId
+        end
+        -- Ceiling collision (jumping and hitting ceiling)
+        if vy < 0 and self.sensors[5] and self.sensors[6] and tilemap[top] then
+            local leftSensorX = math.floor(self.sensors[5].x / tileSize) + 1
+            local rightSensorX = math.floor(self.sensors[6].x / tileSize) + 1
+            local leftSensorTile = tilemap[top][leftSensorX]
+            local rightSensorTile = tilemap[top][rightSensorX]
+            local leftTileCollision = leftSensorTile and tonumber(leftSensorTile) > 0
+            local rightTileCollision = rightSensorTile and tonumber(rightSensorTile) > 0
+            local hasPixelCollision = false
+            if leftTileCollision then
+                local leftTileId = tonumber(leftSensorTile)
+                local leftPixelCollision = PixelCollision.checkSensorPixelCollision(
+                    tileset,
+                    leftTileId + 1,
+                    self.sensors[5].x,
+                    self.sensors[5].y,
+                    leftSensorX - 1,
+                    top - 1,
+                    tileSize
+                )
+                print("Ceiling left: tileId="..tostring(leftTileId).." pixelCollision="..tostring(leftPixelCollision))
+                if leftPixelCollision then hasPixelCollision = true end
+            end
+            if rightTileCollision then
+                local rightTileId = tonumber(rightSensorTile)
+                local rightPixelCollision = PixelCollision.checkSensorPixelCollision(
+                    tileset,
+                    rightTileId + 1,
+                    self.sensors[6].x,
+                    self.sensors[6].y,
+                    rightSensorX - 1,
+                    top - 1,
+                    tileSize
+                )
+                print("Ceiling right: tileId="..tostring(rightTileId).." pixelCollision="..tostring(rightPixelCollision))
+                if rightPixelCollision then hasPixelCollision = true end
+            end
+            if hasPixelCollision then
+                self.y = top * tileSize + self.heightrad + 0.1
+                self.yspeed = 0
+            elseif leftTileCollision or rightTileCollision then
+                -- Fallback: tile-based collision
+                self.y = top * tileSize + self.heightrad + 0.1
+                self.yspeed = 0
+                print("Fallback: tile-based ceiling collision")
             end
         end
         ::continue::
@@ -383,12 +466,19 @@ function Player:checkCsvCollisions(level, tileSize)
             end
         else
             self.grounded = false
+            -- Clear ground properties when airborne
+            self.groundAngle = 0
+            self.groundTileId = nil
         end
     end
     if wasGrounded and not self.grounded then
         self.framesNotGrounded = (self.framesNotGrounded or 0) + 1
         if self.framesNotGrounded <= self.groundedToleranceFrames then
             self.grounded = true
+        else
+            -- Clear ground properties when truly airborne
+            self.groundAngle = 0
+            self.groundTileId = nil
         end
     elseif self.grounded then
         self.framesNotGrounded = 0
@@ -443,6 +533,10 @@ function Player:init()
     self.groundStabilityMax = 8 -- Increased to prevent "in air" flashes
     self.framesNotGrounded = 0
     self.groundedToleranceFrames = 3 -- Allow this many frames of being "ungrounded" before truly being in air
+    
+    -- Initialize slope/ground properties
+    self.groundAngle = 0 -- Current ground angle (in hex format 0-255)
+    self.groundTileId = nil -- Current ground tile ID for slope physics
     
     -- Initialize sensors manually
     self:updateSensors()
@@ -636,6 +730,59 @@ function Player:update()
                 self.state = PlayerState.IDLE
             end
         end
+        
+        -- Apply slope physics when grounded
+        if self.groundTileId and TileAngleManager.isSlope(self.groundTileId) then
+            local slopeForceX, slopeForceY = TileAngleManager.getSlopeForce(self.groundTileId, self.physics.gravity or 0.3125)
+            
+            -- Enhanced Sonic-style slope influence
+            local groundAngleDegrees = TileAngleManager.getTileAngleDegrees(self.groundTileId) or 0
+            local slopeInfluence = 0.125 -- Base slope influence factor (0.125 in Sonic games)
+            
+            -- Increase influence on steeper slopes
+            local angleFactor = math.abs(groundAngleDegrees) / 45.0 -- Normalize to 45 degree reference
+            slopeInfluence = slopeInfluence * (1.0 + angleFactor * 0.5)
+            
+            -- Apply slope force based on ground angle
+            if groundAngleDegrees > 0 then
+                -- Downward slope (right side lower) - accelerate to the right when going down
+                if self.xspeed >= 0 then
+                    self.xspeed = self.xspeed + slopeInfluence
+                else
+                    -- Going uphill - apply more resistance
+                    self.xspeed = self.xspeed + slopeInfluence * 0.5
+                end
+            elseif groundAngleDegrees < 0 then
+                -- Upward slope (left side lower) - accelerate to the left when going down  
+                if self.xspeed <= 0 then
+                    self.xspeed = self.xspeed - slopeInfluence
+                else
+                    -- Going uphill - apply more resistance
+                    self.xspeed = self.xspeed - slopeInfluence * 0.5
+                end
+            end
+            
+            -- Cap speed based on slope angle - steeper slopes allow higher speeds
+            local slopeSpeedMultiplier = 1.0 + (angleFactor * 0.3)
+            local maxSlopeSpeed = (self.physics.topspeed or 6.0) * slopeSpeedMultiplier
+            if self.xspeed > maxSlopeSpeed then
+                self.xspeed = maxSlopeSpeed
+            elseif self.xspeed < -maxSlopeSpeed then
+                self.xspeed = -maxSlopeSpeed
+            end
+            
+            -- If moving too slowly uphill on steep slopes, slide back down (Sonic mechanic)
+            if math.abs(groundAngleDegrees) > 35 and math.abs(self.xspeed) < 2.0 then
+                local slideForce = slopeInfluence * 2.0
+                if groundAngleDegrees > 0 then
+                    self.xspeed = self.xspeed + slideForce -- Slide right on right-facing slopes
+                else
+                    self.xspeed = self.xspeed - slideForce -- Slide left on left-facing slopes
+                end
+            end
+            
+            -- print("DEBUG: Enhanced slope physics - angle:", groundAngleDegrees, "influence:", slopeInfluence, "xspeed:", self.xspeed)
+        end
     else
         -- Air movement - according to Sonic Physics Guide
         local airAcc = 0.09375 -- Air acceleration (0.09375 per frame in Sonic games)
@@ -741,6 +888,16 @@ function Player:drawSensors(cameraX, cameraY)
     gfx.drawText(string.format("Pos: %.1f, %.1f", self.x, self.y), 10, 100)
     gfx.drawText(string.format("Speed: %.1f, %.1f", self.xspeed, self.yspeed), 10, 120)
     
+    -- Draw slope information
+    if self.groundTileId and self.grounded then
+        gfx.drawText("Ground Tile: " .. tostring(self.groundTileId), 10, 160)
+        gfx.drawText("Ground Angle: " .. tostring(self.groundAngle), 10, 180)
+        if TileAngleManager.isSlope(self.groundTileId) then
+            local degrees = TileAngleManager.getTileAngleDegrees(self.groundTileId)
+            gfx.drawText("Slope: " .. string.format("%.1f°", degrees), 10, 200)
+        end
+    end
+    
     -- Draw current state name (compact)
     local stateNames = {
         [1] = "IDLE", [2] = "IMPATIENT", [3] = "I_BAL_F", [4] = "I_BAL_B",
@@ -787,16 +944,16 @@ function Player:checkCollisions(level, tileSize)
     -- Use cached tileset if available, or load it once
     if not self.collisionTileset then
         -- Try different path formats until one works
-        self.collisionTileset = gfx.imagetable.new("sprites/tileset/SPGSolidTileHeightCollision_flipped-table-16-16")
+        self.collisionTileset = gfx.imagetable.new("sprites/tileset/DF-Simple-Collision-table-16-16")
         
         -- If still not loaded, try alternate paths
         if not self.collisionTileset then
-            self.collisionTileset = gfx.imagetable.new("source/sprites/tileset/SPGSolidTileHeightCollision_flipped-table-16-16")
+            self.collisionTileset = gfx.imagetable.new("source/sprites/tileset/DF-Simple-Collision-table-16-16")
         end
         
         -- If still not loaded, try just the filename
         if not self.collisionTileset then
-            self.collisionTileset = gfx.imagetable.new("SPGSolidTileHeightCollision_flipped-table-16-16")
+            self.collisionTileset = gfx.imagetable.new("DF-Simple-Collision-table-16-16")
         end
         
         -- Final check

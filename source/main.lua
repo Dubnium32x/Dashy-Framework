@@ -24,7 +24,7 @@ _G.Options = {
 -- import "image_path_tester"
 -- import "file_system_tester" 
 -- import "test_imagetable"
-
+ 
 -- Print working directory to help with debugging paths
 print("Working directory information:")
 
@@ -145,6 +145,11 @@ function pd.draw()
         if _G.lastFrameTime > 20 then
             gfx.drawText("⚠️ Heavy frame", 300, y + 15)
         end
+    end
+    
+    -- Show current tile ID under player for debugging
+    if _G.debugTileId then
+        gfx.drawText("Tile: " .. tostring(_G.debugTileId), 300, 50)
     end
     
     -- Reset to normal drawing mode

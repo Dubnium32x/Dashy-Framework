@@ -2,7 +2,7 @@ import "CoreLibs/graphics"
 
 local gfx <const> = playdate.graphics
 
-local imageTable = gfx.imagetable.new("sprites/tileset/SPGSolidTileHeightCollision_flipped-table-16-16.png")
+local imageTable = gfx.imagetable.new("sprites/tileset/DF-Simple-Collision-table-16-16")
 
 function playdate.update()
     gfx.clear()

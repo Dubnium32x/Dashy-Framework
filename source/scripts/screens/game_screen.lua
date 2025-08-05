@@ -32,7 +32,7 @@ function GameScreen:init()
     end
     
     -- Load tileset once during initialization - try different path formats
-    cachedTileset = gfx.imagetable.new("sprites/tileset/SPGSolidTileHeightCollision_flipped-table-16-16")
+    cachedTileset = gfx.imagetable.new("sprites/tileset/DF-Simple-Collision-table-16-16")
     if not cachedTileset then
         print("Failed to load tileset! Check path and file.")
     else
@@ -189,11 +189,11 @@ function GameScreen:drawLevel()
         gfx.drawText("Error: Tileset not found!", 10, 30)
         
         -- Try loading tileset again with different path
-        cachedTileset = gfx.imagetable.new("sprites/tileset/SPGSolidTileHeightCollision_flipped-table-16-16")
+        cachedTileset = gfx.imagetable.new("sprites/tileset/DF-Simple-Collision-table-16-16")
         
         -- If still not loaded, try with just the filename
         if not cachedTileset then
-            cachedTileset = gfx.imagetable.new("SPGSolidTileHeightCollision_flipped-table-16-16")
+            cachedTileset = gfx.imagetable.new("DF-Simple-Collision-table-16-16")
             if not cachedTileset then
                 -- Draw placeholder tiles so we can still see something
                 for row = 1, 20 do
